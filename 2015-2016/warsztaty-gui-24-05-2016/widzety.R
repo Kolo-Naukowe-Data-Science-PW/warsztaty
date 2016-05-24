@@ -117,7 +117,7 @@ co = function(h,...) print("Copyuje")
 #Tym razem robimy zagnieżdżone listy w listach. Jedna File zawiera narzędzia z poprzedniego toolbara.
 # Kolejna Edit to nowe przed chwilą zdefiniowane funckje.
 pasek.rozwij = list(File=list(open = list(handler=o,icon="open"), quit = list(handler=q,icon="close")) ,
-             Edit = list(cut  = list(handler=cu), copy = list(handler=co)))
+                    Edit = list(cut  = list(handler=cu), copy = list(handler=co)))
 # Jak widać menu, może być naprawdę skomplikowane
 gmenu(pasek.rozwij, cont=TRUE)  
 
@@ -184,8 +184,54 @@ addHandlerChanged(e, function(h,...) print("Enter to też przycisk, więc")) # T
 
 ################################################ Budowanie interfejsu #######################################################
 
-# W tym miejscu budowana będzie pierwszy interfejs na zajęciach. Dla osób nieuczestniczących zostanie po warsztatach wrzucona
-# wersja z wpisanym kodem tutaj.
+# Będziemy chcieli stworzyć funkcję do przeglądania dostępnych bibliotek oraz ich ładowania lub wyłączania
+# Docelowo będzie to gtable, który jako itemy przyjmuje listę z nazwą dostępnych bibliotek
+# oraz True jeśli jest załadowana i False jeśli nie, a jako handler funckję która po podwójnym kliknięciu 
+# dołączy nam bibliotekę i zmieni wartość z T na F i na odwrót, zależnie od działania
+
+# Zacznijmy od stworzenia funckji która ściągnie 
+getPackages = function(...) {
+    # Przypisujemy do tej zmiennej listę wszystkich dostępnych bibliotek
+    allPackages = .packages(all.available=TRUE)
+    # operator %in% zwraca wektor logiczny, który jeśli znajdzie element występujący
+    # w .packages() w allPackages to przypisuje mu TRUE jeśli nie to FALSE
+    # Dla przykładu c(1,2,3) %in% 1 zwróci TRUE FALSE FALSE
+    loaded = allPackages %in% .packages()
+    # Tworzymy teraz oczekiwanego data frame
+    data.frame(Package=allPackages,loaded=loaded,
+               stringsAsFactors=FALSE)
+}
+# dla zobaczenia wyników można puścić komendę getPackages
+
+# Przechodzimy teraz do tworzenia handlera
+packageHandler = function(h,...) {
+    # Wpierw pobieramy wszystkie wybrane biblioteki, bez drop=F dostalibyśmy tylko ich nazwy
+    # a tak razem z informacją o załadowaniu
+    packages = svalue(h$obj, drop=FALSE) 
+    # Tutaj musimy zastosować pętle bo użytkownik może zaznaczyć kilka bibliotek 
+    for(i in 1:nrow(packages)) {
+        if(packages[i,2] == TRUE) { # Jeśli biblioteka jest załadowana to
+            # Tworzymy nazwę package:nazwa biblioteki
+            pkg = paste("package:",packages[i,1],sep="")
+            # I detachujemy
+            detach(pos = match(pkg, search()))
+        } else { # Jeśli bibliotek nie jest załadowana
+            require(packages[i,1], character.only=TRUE) # To ją dodajemy
+        }
+    }
+    #  Na końcu robimy aktualizację listy (zmienią nam się True na Falsy i na odwrót)
+    h$obj[,] = getPackages() 
+}
+
+# Pozostaje nam tylko napisać ostateczny gtable
+packageList = gtable(
+    items = getPackages(),
+    sort.columns = 1:2,
+    handler = packageHandler,
+    container = TRUE
+)
+# I puścić cały kod od początku tego zagadnienia. Możemy interaktynie ładować biblioteki
+
 
 # W poprzednim przykładzie użyliśmy tylko jednej funckji gtable, co jeśli chcemy wstawić wykres, miejsce 
 # do wczytywania danych, suwaki itp ?
@@ -243,8 +289,131 @@ pg = gpanedgroup(cont=win)
 gbutton("button 1", cont=pg)
 gbutton("button 2", cont=pg)
 
-# W tym miejscu będą znowu kodowane przykłady na żywo. Oraz zadane zadanie do zrobienia. W wersji po warsztatych
-# zostaną wpisane tutaj te kody.
+#W tym momencie jesteśmy gotowi na prawdziwe interfejsy !!!!
+# Pierwszym naszym tworem będzie interaktywne rysowanie funckji kwadratowej
+# Tworzymy okno
+win = gwindow("Funkcja kwadratowa")
+# Następnie umieszczamy w nim paned group, czyli miejsce na kilka grup obok siebie
+pg = gpanedgroup(cont=win)  
+# Pierwsza grupa będzie odpowiadała za wczytywanie współczynników do funckji
+gg.arg = ggroup( cont=pg)
+# Druga grupa będzie odpowiedzialna za bieżące rysowanie wykresów funckji
+gg.plot =ggroup( cont=pg)
+# gstatusbar jest czymś podobnym do paska statusu w przeglądarkach lub paska 
+# podpowiedzi w programach. Uwaga na container
+gstatusbar("Ustaw współczynniki funkcji kwadratowej",cont=win)
+
+# Zajmijmy się tworzeniem okna do wczytywania współczynników a,b,c
+# Najpierw tworzymy frame, który oddzieli nam miejsce od wpisywania
+gg.arg.f=gframe("Współczynniki funkcji kwadratowej",cont=gg.arg)
+# PRzechodzimy do layoutu
+tbl = glayout(cont=gg.arg.f)
+# Tworzymy 3 suwaki to ustawiania wartości parametrów. 
+tbl[1,1, anchor=c(1,0)] <- "a"
+tbl[1,4:20] <- (a<-gslider(from= (-3), to = 3, by = 0.1, cont=tbl))
+tbl[8,1, anchor=c(1,0)] <- "b"
+tbl[8,4:20] <- (b<-gslider(from= (-3), to = 3, by = 0.1, cont=tbl))
+tbl[16,1, anchor=c(1,0)] <- "c"
+tbl[16,4:20] <- (c<-gslider(from= (-3), to = 3, by = 0.1, cont=tbl))
+# W tym momencie możemy już odpalić napisaną część i pozmieniać ułożenie
+
+# Przechodzimy do tworzenia grame na grafikę
+gg.plot.f=gframe("Wykres",cont=gg.plot)
+gg<-ggraphics(cont=gg.plot.f)
+visible(gg)<-T
+
+# Wygląd interfejsu jest gotowy. Teraz trzeba dopisać jego funkcjonalności
+# Zacznijmy od funkcji która sczyta wartości parametrów i jako wyjście 
+# przekaże x i y
+take.arguments<-function(...){
+    x<-seq(-5,5,0.1) # Dobrane przykładowo
+    l<-list(x,y=(svalue(a)*x^2+svalue(b)*x+svalue(c)))
+    return(l)
+}
+
+# Dodajemy pierwszy handler, który na zmianę parametru a narysuje wykres
+# zauważmy że zmienna a jest przypisana do suwaka pierwszego 
+ID<-addHandlerChanged(a, handler=function(h,...) {
+    l<-take.arguments()
+    plot(x=l[[1]],y=l[[2]],xlim=c(-5,5),ylim=c(-5,5),xlab="x",ylab="ax^2+bx+c")
+})
+# To samo dla parametru b
+ID.2<-addHandlerChanged(b, handler=function(h,...) {
+    l<-take.arguments()
+    plot(x=l[[1]],y=l[[2]],xlim=c(-5,5),ylim=c(-5,5),xlab="x",ylab="ax^2+bx+c")
+})
+# I c
+ID.3<-addHandlerChanged(c, handler=function(h,...) {
+    l<-take.arguments()
+    plot(x=l[[1]],y=l[[2]],xlim=c(-5,5),ylim=c(-5,5),xlab="x",ylab="ax^2+bx+c")
+})
+# Odpalamy cały napisany kod i odkrywamy za co odpowiadają czynniki przy funkcji kwadratowej
+
+# Poniższy zadanie podczas warsztatów zostało zadane jako zadanie do zrobienia.
+# Przedstawiam swoje rozwiązanie.
+# Należy napisać program, który pobiera w różny sposób wektor x i y. Program  ma mieć 3 przyciski
+# po kliknięciu jednego jest rysowany wykres y od x i narysowaywana linia regresji, po kliknięciu
+# 2 mają się pojawić wykresy dopasowania regresji, a po 3 ma się wyświetlać w danych okienkach
+# wartości wyrazu wolnego i współczynnika lini regresji, oraz wartość r-kwadrat
+
+win = gwindow("Regresja liniowa")
+pg = gpanedgroup(cont=win,expand=T)
+
+gg.data=ggroup(cont=pg)
+gg.data.f=gframe("Zakres danych",cont=gg.data)
+tbl = glayout(cont=gg.data.f)
+tbl[1,1, anchor=c(1,0)] <- "X"
+tbl[1,2:20] <- (a<-gdroplist(c(ls()), cont=tbl)) 
+tbl[8,1, anchor=c(1,0)] <- "Y"
+tbl[8,2:20] <- (b<-gedit(initial.msg="Tu wpisz dane y", cont=tbl))
+tbl[14,10, anchor=c(1,0)] <-(c<-gbutton("Model liniowy",cont=tbl))
+tbl[16,10, anchor=c(1,0)] <-(d<-gbutton("Wykresy dopasowania",cont=tbl))
+tbl[18,10, anchor=c(1,0)] <-(e<-gbutton("Wyniki",cont=tbl))
+
+gg.plot.f=gframe("Wykres",cont=pg)
+gg.p<-ggraphics(cont=gg.plot.f)
+visible(gg.p)<-T
+
+gg.results.f=gframe("Wyniki",cont=gg.data)
+tbl.1 = glayout(cont=gg.results.f)
+tbl.1[5,1, anchor=c(1,0)] <- "Wyraz wolny"
+tbl.1[5,2:5] <- (f<-gedit(cont=tbl.1))
+tbl.1[7,1, anchor=c(1,0)] <- "Współczynnik przy X"
+tbl.1[7,2:5] <- (g<-gedit(cont=tbl.1))
+tbl.1[9,1, anchor=c(1,0)] <- "r-kwadrat"
+tbl.1[9,2:5] <- (i<-gedit(cont=tbl.1))
+
+take.arguments<-function(...){
+    x<-eval(parse(text = svalue(a)))
+    y<-eval(parse(text = svalue(b)))
+    l<-list(x,y)
+    return(l)
+}
+ID<-addHandlerChanged(c, handler=function(h,...) {
+    l<-take.arguments()
+    model<-lm(l[[2]]~l[[1]])
+    plot(l[[1]],l[[2]])
+    abline(model)
+})
+ID.2<-addHandlerChanged(d, handler=function(h,...) {
+    l<-take.arguments()
+    model<-lm(l[[2]]~l[[1]])
+    par(mfrow=c(2,2))
+    plot(model)
+    par(mfrow=c(1,1))
+})
+ID.3<-addHandlerChanged(e, handler=function(h,...) {
+    l<-take.arguments()
+    model<-lm(l[[2]]~l[[1]])
+    svalue(f)<-model$coef[[1]]
+    svalue(g)<-model$coef[[2]]
+    svalue(i)<-summary(model)$r.squared
+})
+
+# Przetestujmy teraz jakieś dane
+x<-c(1,2,3,5,5,6,7,8,9,10)
+y<-c(0,2,2,4,5,5,8,9,9,12)
+# Odpalmy cały kod, pod x wstawmy x i pod y,y
 
 ################################################ Wykorzystanie biblioteki pmg ######################################################
 # upewnij się że jest zainstalowana ta biblioteka. PMG to skrót od Poor Man GUI. Ta sama osoba, która tworzyła poprzednią bibliotekę
@@ -254,10 +423,3 @@ require(pmg)
 #       https://www.r-project.org/conferences/useR-2007/program/presentations/verzani-2.pdf
 
 ################################################# Niespodzianka jeśli starczy czasu ###################################################
-
-
-
-
-
-
-
